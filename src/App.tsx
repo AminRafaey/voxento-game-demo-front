@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import { PhaserGame } from "./PhaserGame";
 import { ToastContainer } from "react-toastify";
+import { GameModalsContainer } from "./components/GameModalsContainer";
 
 function App() {
   const theme = useMemo(
@@ -43,6 +44,7 @@ function App() {
         stacked
       />
       <CssBaseline />
+      <GameModalsContainer />
       <PhaserGame />
     </ThemeProvider>
   );

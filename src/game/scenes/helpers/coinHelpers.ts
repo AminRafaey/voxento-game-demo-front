@@ -176,7 +176,8 @@ export function populateCoins({
 
 export function createCoinPickupHandler(
   scene: Phaser.Scene,
-  healthController: LocalHealthController
+  healthController: LocalHealthController,
+  onCollect?: (coinId: string) => void
 ): Phaser.Types.Physics.Arcade.ArcadePhysicsCallback {
   return (_player, coinObject) => {
     const coin = coinObject as Phaser.Physics.Arcade.Sprite;
@@ -184,16 +185,22 @@ export function createCoinPickupHandler(
       return;
     }
 
+    const coinId = coin.getData("coinId");
     const pickupX = coin.x;
     const pickupY = coin.y;
 
     coin.disableBody(true, true);
 
-    const healPercentRaw = coin.getData("healPercent");
-    const healPercent =
-      typeof healPercentRaw === "number" ? healPercentRaw : 0.1;
-
-    healthController.addHealthPercent(healPercent);
+    // Notify server about collection (server will handle heal)
+    if (onCollect && coinId) {
+      onCollect(coinId);
+    } else {
+      // Fallback for local-only mode (offline)
+      const healPercentRaw = coin.getData("healPercent");
+      const healPercent =
+        typeof healPercentRaw === "number" ? healPercentRaw : 0.1;
+      healthController.addHealthPercent(healPercent);
+    }
 
     const sparkle = scene.add.circle(pickupX, pickupY, 14, 0xffe066, 0.7);
     sparkle.setDepth(9);

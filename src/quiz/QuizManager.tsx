@@ -21,6 +21,8 @@ import {
   QUIZ_EVENT_ANSWERED,
   QUIZ_EVENT_CLOSED,
   QUIZ_EVENT_OPENED,
+  QUIZ_AVAILABILITY_CHANGED,
+  type QuizAvailabilityEvent,
 } from "./events";
 import type { QuizQuestion } from "./types";
 import { useQuizQuestions } from "./useQuizQuestions";
@@ -34,6 +36,7 @@ export function QuizManager() {
   const [activeQuestion, setActiveQuestion] = useState<QuizQuestion | null>(
     null
   );
+  const [available, setAvailable] = useState(false);
   const dialogOpenRef = useRef(dialogOpen);
 
   useEffect(() => {
@@ -118,6 +121,26 @@ export function QuizManager() {
     : "Answer a quiz for a health bonus.";
 
   const disabled = loading || dialogOpen;
+
+  useEffect(() => {
+    const handleAvailability = (event: QuizAvailabilityEvent) => {
+      const nextAvailable = Boolean(event.detail?.available);
+      setAvailable(nextAvailable);
+      if (!nextAvailable) {
+        handleCloseDialog();
+      }
+    };
+
+    window.addEventListener(QUIZ_AVAILABILITY_CHANGED, handleAvailability);
+
+    return () => {
+      window.removeEventListener(QUIZ_AVAILABILITY_CHANGED, handleAvailability);
+    };
+  }, [handleCloseDialog]);
+
+  if (!available) {
+    return null;
+  }
 
   return (
     <>

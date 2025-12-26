@@ -15,11 +15,12 @@ export class Boot extends Scene {
     this.load.setPath("/assets/");
 
     this.load.image("background", "bg.png");
-    // this.load.image("background", "space-stars.jpg");
+    this.load.image("star", "star.png");
+    this.load.image("clouds", "cloud.png");
     this.load.atlas("sprite", "sprite.png", "sprite.json");
 
-    this.load.image("tiles", "tilesheet.png");
-    this.load.tilemapTiledJSON("tilemap", "long_map.json");
+    this.load.image("tiles", "final_map.png");
+    this.load.tilemapTiledJSON("tilemap", "final_map.json");
 
     this.load.spritesheet("coin-gold", "coin-gold.png", {
       frameWidth: 16,
