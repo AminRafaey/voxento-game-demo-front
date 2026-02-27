@@ -37,7 +37,7 @@ interface GameResultsPayload {
 }
 
 export class MainMenu extends Scene {
-  private player!: Phaser.Physics.Arcade.Sprite;
+  private player!: Phaser.Physics.Matter.Sprite;
   private shadow!: Phaser.GameObjects.Ellipse;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private spaceKey!: Phaser.Input.Keyboard.Key;
@@ -57,8 +57,7 @@ export class MainMenu extends Scene {
   private playerTint: number = 0xffffff;
   private bgMusic?: Phaser.Sound.BaseSound;
   private musicButton?: Phaser.GameObjects.Text;
-  private coins!: Phaser.Physics.Arcade.Group;
-  private coinOverlap?: Phaser.Physics.Arcade.Collider;
+  private coins!: Phaser.GameObjects.Group;
   private handleCoinPickup!: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback;
   private readonly defaultMusicVolume = 0.3;
   private lastSnapshotSentAt = 0;
@@ -114,8 +113,8 @@ export class MainMenu extends Scene {
     this.updateQuizAvailability(false);
     const mapHeight = this.map.heightInPixels;
 
-    // Set world bounds
-    this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
+    // Set world bounds for Matter physics
+    this.matter.world.setBounds(0, 0, mapWidth, mapHeight);
 
     // Add background
     const bg = this.add.image(mapWidth / 2, mapHeight / 2, "background");
@@ -192,22 +191,71 @@ export class MainMenu extends Scene {
 
     // Create ground layer (using correct layer name from new_game.json)
     if (tileset) {
-      this.groundLayer = this.map.createLayer("ground", tileset, 0, 0)!;
-      // Note: JSON has typo "colides" instead of "collides"
-      this.groundLayer.setCollisionByProperty({ Custome_Collide: true });
+      this.groundLayer = this.map.createLayer("ground_layer", tileset, 0, 0)!;
+      // Note: JSON has "base_collides" property for collision tiles
+      this.groundLayer.setCollisionByProperty({ base_collides: true });
       this.groundLayer.setDepth(5);
+      // Convert tilemap layer to Matter physics bodies
+      this.matter.world.convertTilemapLayer(this.groundLayer);
+    }
+
+    // Load physics bodies from the physics_bounds object layer
+    const physicsLayer = this.map.getObjectLayer("physics_bounds");
+    if (physicsLayer && physicsLayer.objects) {
+      physicsLayer.objects.forEach((obj: any) => {
+        if (obj.polygon && obj.properties) {
+          // Create Matter.js static body for diagonal shapes
+          const vertices = obj.polygon.map((p: any) => ({
+            x: p.x,
+            y: p.y,
+          }));
+          
+          const body = this.matter.add.fromVertices(
+            obj.x,
+            obj.y,
+            vertices,
+            {
+              // Make hurdles very slippery and not bouncy so the player slides over them
+              friction: 0,
+              restitution: 0.01,
+              isStatic: true,
+              label: "physics_bound",
+            },
+            false
+          );
+          console.log("✅ Physics bound created:", body);
+        }
+      });
     }
 
     // Create shadow
     this.shadow = this.add.ellipse(100, 330, 40, 12, 0x000000, 0.4);
     this.shadow.setDepth(9);
 
-    // Create player sprite
-    this.player = this.physics.add.sprite(100, 300, "sprite", "sprite_idle");
+    // Create player sprite with Matter physics
+    this.player = this.matter.add.sprite(100, 300, "sprite", "sprite_idle");
+    
+    // Configure physics body - CRITICAL for collision response
+    if (this.player && this.player.body) {
+      // Keep Phaser's default body shape so the sprite sits correctly on the ground,
+      // but tune the physics properties to avoid sticking on hurdles.
+      this.player.setFixedRotation();
+
+      const body = this.player.body as any;
+      body.friction = 0.02; // Lower friction to reduce sticking on slopes
+      body.frictionAir = 0.001; // Minimal air resistance
+      body.restitution = 0.05; // Small bounce to avoid jitter on landing
+      body.label = "player";
+      body.frictionStatic = 0; // No static friction so we don't glue to hurdles
+      body.angularVelocity = 0; // Prevent spinning
+    }
+    
+    // Configure display
     this.player.setScale(0.6);
-    this.player.setBounce(0.2);
-    this.player.setCollideWorldBounds(true);
-    this.player.setDepth(10);
+    // this.player.setOrigin(0.5, 1); // Bottom center for standing
+    // this.player.setDepth(10);
+    this.player.setVisible(true);
+    console.log("👤 Player sprite created:", this.player);
 
     // Create animations
     this.anims.create({
@@ -235,10 +283,9 @@ export class MainMenu extends Scene {
 
     this.player.play("idle");
 
-    // Setup collision
-    if (this.groundLayer) {
-      this.physics.add.collider(this.player, this.groundLayer);
-    }
+    // Setup collision with Matter physics - tilemap already has collision set up
+    // Matter automatically handles collision with converted tilemaps
+    console.log("✅ Player ready for collision with ground layer");
 
     // Setup input
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -307,10 +354,9 @@ export class MainMenu extends Scene {
 
     registerCoinAnimations(this);
 
-    this.coins = this.physics.add.group({
-      allowGravity: false,
-      immovable: true,
-      classType: Phaser.Physics.Arcade.Sprite,
+    // Create coins group for Matter physics
+    this.coins = this.add.group({
+      classType: Phaser.GameObjects.Sprite,
     });
 
     // Coins will be populated from server state, not locally
@@ -330,13 +376,24 @@ export class MainMenu extends Scene {
       }
     );
 
-    this.coinOverlap = this.physics.add.overlap(
-      this.player,
-      this.coins,
-      this.handleCoinPickup,
-      undefined,
-      this
-    );
+    // Setup overlap detection for coins
+    if (this.coins) {
+      this.matter.world.on("beforeupdate", () => {
+        const children = this.coins.getChildren() as Phaser.GameObjects.Sprite[];
+        children.forEach((coin) => {
+          if (
+            Phaser.Math.Distance.Between(
+              this.player.x,
+              this.player.y,
+              coin.x,
+              coin.y
+            ) < 30
+          ) {
+            this.handleCoinPickup.call(this, this.player, coin);
+          }
+        });
+      });
+    }
 
     // Initialize multiplayer helpers
     this.remotePlayers = new RemotePlayerManager(this, {
@@ -849,14 +906,9 @@ export class MainMenu extends Scene {
       finalY = tileTop - tileHeight * 0.5;
     }
 
-    const coin = this.coins.create(
-      serverX,
-      finalY,
-      variant
-    ) as Phaser.Physics.Arcade.Sprite;
-
-    coin.setDepth(8);
+    const coin = this.add.sprite(serverX, finalY, variant);
     coin.setScale(2);
+    coin.setDepth(8);
     coin.setData("coinId", coinId);
     coin.setData("healPercent", coinState.healPercent);
 
@@ -865,17 +917,7 @@ export class MainMenu extends Scene {
       coin.anims.setProgress(Math.random());
     }
 
-    const body = coin.body as Phaser.Physics.Arcade.Body;
-    body.setAllowGravity(false);
-    body.setImmovable(true);
-    body.moves = false;
-
-    const radius = coin.displayWidth * 0.32;
-    body.setCircle(
-      radius,
-      coin.displayWidth / 2 - radius,
-      coin.displayHeight / 2 - radius
-    );
+    this.coins.add(coin);
 
     console.log(
       `Coin ${coinId} added at (${serverX}, ${finalY}) - Ground tile: ${
@@ -911,7 +953,7 @@ export class MainMenu extends Scene {
     if (!this.coins) return;
 
     // Find and remove the coin from the group
-    const children = this.coins.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    const children = this.coins.getChildren() as Phaser.GameObjects.Sprite[];
     const coin = children.find((c) => c.getData("coinId") === coinId);
 
     if (coin) {
@@ -937,8 +979,13 @@ export class MainMenu extends Scene {
       this.updateLobbyOverlay(false);
     }
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
-    const onGround = body.touching.down || body.blocked.down;
+    const body = this.player.body as any;
+    
+    // Prevent rotation when hitting diagonal surfaces
+    this.player.setRotation(0);
+    body.angularVelocity = 0;
+    
+    const onGround = this.isPlayerOnGround(body);
 
     // Update shadow
     const shadowOffsetX = this.player.flipX ? 10 : -10;
@@ -959,7 +1006,7 @@ export class MainMenu extends Scene {
     }
 
     if (!this.gameStarted || this.gameEnded) {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
@@ -998,7 +1045,7 @@ export class MainMenu extends Scene {
     }
 
     if (this.quizActive) {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
@@ -1009,7 +1056,7 @@ export class MainMenu extends Scene {
     }
 
     if (!this.healthController.canMove()) {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
@@ -1035,24 +1082,24 @@ export class MainMenu extends Scene {
     let costSpentThisFrame = horizontalResult.consumed;
 
     if (movementBlocked) {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
     } else if (this.cursors.left.isDown) {
-      this.player.setVelocityX(-250);
+      this.setPlayerVelocityX(-250);
       this.player.setFlipX(true);
       if (onGround && this.player.anims.currentAnim?.key !== "walk") {
         this.player.play("walk", true);
       }
     } else if (this.cursors.right.isDown) {
-      this.player.setVelocityX(250);
+      this.setPlayerVelocityX(250);
       this.player.setFlipX(false);
       if (onGround && this.player.anims.currentAnim?.key !== "walk") {
         this.player.play("walk", true);
       }
     } else {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
@@ -1069,7 +1116,7 @@ export class MainMenu extends Scene {
       );
 
       if (!jumpResult.blocked) {
-        this.player.setVelocityY(-450);
+        this.setPlayerVelocityY(-450);
         if (this.player.anims.currentAnim?.key !== "jump") {
           this.player.play("jump", true);
         }
@@ -1081,7 +1128,7 @@ export class MainMenu extends Scene {
     }
 
     if (movementBlocked) {
-      this.player.setVelocityX(0);
+      this.setPlayerVelocityX(0);
       if (onGround && this.player.anims.currentAnim?.key !== "idle") {
         this.player.play("idle", true);
       }
@@ -1108,14 +1155,43 @@ export class MainMenu extends Scene {
     }
   }
 
+  private isPlayerOnGround(body: Phaser.Physics.Matter.Body): boolean {
+    // Ground detection based on velocity (not jump count)
+    // This works correctly even when player lands on hurdles
+    if (!body || !body.body) return false;
+    
+    const matterBody = body.body as any;
+    const velocityY = matterBody.velocity?.y || 0;
+    
+    // Player is on ground if falling or moving slowly downward
+    // Threshold allows small upward velocity while still being grounded
+    return velocityY >= -10;
+  }
+
+  private setPlayerVelocityX(velocity: number): void {
+    if (this.player && this.player.body) {
+      const body = this.player.body as any;
+      if (body.setVelocity) {
+        body.setVelocity(velocity, body.velocity?.y || 0);
+      }
+    }
+  }
+
+  private setPlayerVelocityY(velocity: number): void {
+    if (this.player && this.player.body) {
+      const body = this.player.body as any;
+      if (body.setVelocity) {
+        body.setVelocity(body.velocity?.x || 0, velocity);
+      }
+    }
+  }
+
   shutdown() {
     if (this.quizEventHandlers) {
       unregisterQuizEventListeners(this.quizEventHandlers);
       this.quizEventHandlers = undefined;
     }
     this.quizActive = false;
-    this.coinOverlap?.destroy();
-    this.coinOverlap = undefined;
     if (this.coins) {
       this.coins.clear(true, true);
     }

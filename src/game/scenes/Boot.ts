@@ -20,7 +20,7 @@ export class Boot extends Scene {
     this.load.atlas("sprite", "sprite.png", "sprite.json");
 
     this.load.image("tiles", "final_map.png");
-    this.load.tilemapTiledJSON("tilemap", "final_map.json");
+    this.load.tilemapTiledJSON("tilemap", "testing-diagonal.json");
 
     this.load.spritesheet("coin-gold", "coin-gold.png", {
       frameWidth: 16,
